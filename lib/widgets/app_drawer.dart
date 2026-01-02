@@ -82,7 +82,7 @@ class AppDrawer extends StatelessWidget {
                     context,
                     icon: Icons.assessment,
                     title: 'Sales Report',
-                    route: '/sales-report',
+                    route: '/reports',
                   ),
 
                   // Sales History

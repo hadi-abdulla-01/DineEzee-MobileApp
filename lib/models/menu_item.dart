@@ -22,14 +22,30 @@ class MenuItem {
   });
 
   factory MenuItem.fromFirestore(String id, Map<String, dynamic> data) {
+    // Web app uses 'availableSessions', mobile app uses 'sessionIds'
+    // Check both for compatibility
+    List<String> sessions = [];
+    if (data['availableSessions'] != null) {
+      sessions = List<String>.from(data['availableSessions']);
+    } else if (data['sessionIds'] != null) {
+      sessions = List<String>.from(data['sessionIds']);
+    }
+    
+    // Web app uses 'imageId' (base64), mobile app uses 'imageUrl' (Firebase Storage URL)
+    // Prefer imageUrl, fallback to imageId
+    String? imageSource = data['imageUrl'];
+    if (imageSource == null || imageSource.isEmpty) {
+      imageSource = data['imageId']; // Use base64 from web app
+    }
+    
     return MenuItem(
       id: id,
       name: data['name'] ?? '',
       category: data['category'] ?? '',
       price: (data['price'] ?? 0).toDouble(),
       description: data['description'],
-      imageUrl: data['imageUrl'],
-      sessionIds: List<String>.from(data['sessionIds'] ?? []),
+      imageUrl: imageSource,
+      sessionIds: sessions,
       isAvailable: data['isAvailable'] ?? true,
       branchId: data['branchId'],
     );
@@ -41,8 +57,8 @@ class MenuItem {
       'category': category,
       'price': price,
       'description': description,
-      'imageUrl': imageUrl,
-      'sessionIds': sessionIds,
+      'imageId': imageUrl, // Web app uses imageId field
+      'availableSessions': sessionIds, // Use web app field name
       'isAvailable': isAvailable,
       'branchId': branchId,
     };

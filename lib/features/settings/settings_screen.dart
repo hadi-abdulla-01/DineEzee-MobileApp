@@ -339,28 +339,11 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                   ),
                   
                   _buildSettingCard(
-                    icon: Icons.shopping_cart,
-                    iconColor: AppColors.primaryRed,
-                    title: 'Online Order Settings',
-                    subtitle: 'Delivery fees, minimum order values',
-                    highlighted: true,
-                    onTap: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Coming soon')),
-                      );
-                    },
-                  ),
-                  
-                  _buildSettingCard(
                     icon: Icons.receipt,
                     iconColor: Colors.teal,
                     title: 'Invoice & Numbering',
                     subtitle: 'Custom prefixes and numbering',
-                    onTap: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Coming soon')),
-                      );
-                    },
+                    onTap: () => Navigator.pushNamed(context, '/settings/invoice'),
                   ),
                   
                   _buildSettingCard(
@@ -368,11 +351,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                     iconColor: Colors.brown,
                     title: 'Printing',
                     subtitle: 'Printer settings and receipt templates',
-                    onTap: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Coming soon')),
-                      );
-                    },
+                    onTap: () => Navigator.pushNamed(context, '/settings/printing'),
                   ),
                 ],
               ),
@@ -506,9 +485,18 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
     );
   }
 
-  void _showRestaurantDetailsDialog() {
-    final nameController = TextEditingController(text: _settings?.restaurantName ?? '');
-    final addressController = TextEditingController(text: _settings?.restaurantAddress ?? '');
+  void _showRestaurantDetailsDialog() async {
+    // Fetch current global restaurant details
+    final restaurantDetails = await _firestoreService.getRestaurantDetails();
+    
+    final nameController = TextEditingController(
+      text: restaurantDetails?['name'] ?? 'DineEZee'
+    );
+    final addressController = TextEditingController(
+      text: restaurantDetails?['address'] ?? '123 Foodie Lane, Gourmet City'
+    );
+
+    if (!mounted) return;
 
     showDialog(
       context: context,
@@ -543,11 +531,41 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
             child: const Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Restaurant details saved!')),
-              );
+            onPressed: () async {
+              if (nameController.text.trim().isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please enter restaurant name')),
+                );
+                return;
+              }
+
+              try {
+                await _firestoreService.updateRestaurantDetails(
+                  nameController.text.trim(),
+                  addressController.text.trim(),
+                );
+
+                Navigator.pop(context);
+                await _loadData();
+
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Restaurant details saved!'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Error saving: $e'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              }
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.primaryRed,
@@ -563,48 +581,244 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
   void _showBranchManagementDialog() {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Branch Management'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: _branches.length,
-            itemBuilder: (context, index) {
-              final branch = _branches[index];
-              return ListTile(
-                leading: Icon(Icons.store, color: AppColors.primaryRed),
-                title: Text(branch.name),
-                subtitle: Text(branch.restaurantAddress ?? 'No address'),
-                trailing: branch.isMain
-                    ? Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: AppColors.primaryYellow,
-                          borderRadius: BorderRadius.circular(4),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Branch Management'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: _branches.length,
+                    itemBuilder: (context, index) {
+                      final branch = _branches[index];
+                      return ListTile(
+                        leading: Icon(Icons.store, color: AppColors.primaryRed),
+                        title: Text(branch.name),
+                        subtitle: Text(branch.restaurantAddress ?? 'No address'),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (branch.isMain)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: AppColors.primaryYellow,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  'MAIN',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    color: AppColors.primaryRed,
+                                  ),
+                                ),
+                              ),
+                            PopupMenuButton(
+                              itemBuilder: (context) => [
+                                if (!branch.isMain)
+                                  const PopupMenuItem(
+                                    value: 'setMain',
+                                    child: Text('Set as Main'),
+                                  ),
+                                if (!branch.isMain)
+                                  const PopupMenuItem(
+                                    value: 'delete',
+                                    child: Text('Delete'),
+                                  ),
+                              ],
+                              onSelected: (value) async {
+                                if (value == 'setMain') {
+                                  await _setMainBranch(branch.id);
+                                  setDialogState(() {});
+                                } else if (value == 'delete') {
+                                  await _deleteBranch(branch.id);
+                                  setDialogState(() {});
+                                }
+                              },
+                            ),
+                          ],
                         ),
-                        child: Text(
-                          'MAIN',
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                            color: AppColors.primaryRed,
-                          ),
-                        ),
-                      )
-                    : null,
-              );
-            },
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => _showAddBranchDialog(),
+              child: const Text('Add Branch'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close'),
+            ),
+          ],
         ),
+      ),
+    );
+  }
+
+  void _showAddBranchDialog() {
+    final nameController = TextEditingController();
+    bool isMain = false;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Add Branch'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameController,
+                decoration: const InputDecoration(
+                  labelText: 'Branch Name *',
+                  border: OutlineInputBorder(),
+                  hintText: 'e.g., Downtown Branch',
+                ),
+                autofocus: true,
+              ),
+              const SizedBox(height: 16),
+              SwitchListTile(
+                title: const Text('Set as Main Branch'),
+                value: isMain,
+                onChanged: (value) {
+                  setDialogState(() => isMain = value);
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                if (nameController.text.trim().isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Please enter branch name')),
+                  );
+                  return;
+                }
+
+                try {
+                  await _firestoreService.addBranch(
+                    nameController.text.trim(),
+                    isMain,
+                  );
+
+                  Navigator.pop(context);
+                  await _loadData();
+
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Branch added successfully!'),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Error adding branch: $e'),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                  }
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primaryRed,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Add'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _setMainBranch(String branchId) async {
+    try {
+      await _firestoreService.setMainBranch(branchId);
+      await _loadData();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Main branch updated!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _deleteBranch(String branchId) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Branch'),
+        content: const Text('Are you sure you want to delete this branch? This action cannot be undone.'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
           ),
         ],
       ),
     );
+
+    if (confirm == true) {
+      try {
+        await _firestoreService.deleteBranch(branchId);
+        await _loadData();
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Branch deleted successfully!'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    }
   }
 
   void _showGeneralSettingsDialog() {

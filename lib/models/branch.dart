@@ -1,3 +1,5 @@
+import 'invoice_print_settings.dart';
+
 class Branch {
   final String id;
   final String name;
@@ -7,6 +9,8 @@ class Branch {
   final String currencySymbol;
   final int currencyDecimalPlaces;
   final String timezone;
+  final InvoiceSettings? invoiceSettings;
+  final PrintSettings? printSettings;
 
   Branch({
     required this.id,
@@ -17,6 +21,8 @@ class Branch {
     required this.currencySymbol,
     required this.currencyDecimalPlaces,
     required this.timezone,
+    this.invoiceSettings,
+    this.printSettings,
   });
 
   factory Branch.fromFirestore(String id, Map<String, dynamic> data) {
@@ -29,6 +35,12 @@ class Branch {
       currencySymbol: data['currencySymbol'] ?? '\$',
       currencyDecimalPlaces: data['currencyDecimalPlaces'] ?? 2,
       timezone: data['timezone'] ?? 'Asia/Kolkata',
+      invoiceSettings: data['invoiceSettings'] != null
+          ? InvoiceSettings.fromMap(data['invoiceSettings'])
+          : null,
+      printSettings: data['printSettings'] != null
+          ? PrintSettings.fromMap(data['printSettings'])
+          : null,
     );
   }
 
@@ -41,6 +53,8 @@ class Branch {
       'currencySymbol': currencySymbol,
       'currencyDecimalPlaces': currencyDecimalPlaces,
       'timezone': timezone,
+      if (invoiceSettings != null) 'invoiceSettings': invoiceSettings!.toMap(),
+      if (printSettings != null) 'printSettings': printSettings!.toMap(),
     };
   }
 }

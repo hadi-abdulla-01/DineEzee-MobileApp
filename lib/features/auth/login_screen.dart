@@ -46,37 +46,28 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // 1. Query Firestore (Logic matches Web App src/lib/data.ts)
-      final QuerySnapshot querySnapshot = await FirebaseFirestore.instance
-          .collection('restaurants')
-          .doc('dineeasee-restaurant')
-          .collection('kitchenUsers')
-          .where('username', isEqualTo: username)
-          .limit(1)
-          .get();
-
-      if (querySnapshot.docs.isEmpty) {
-        throw 'User not found';
-      }
-
-      final userData = querySnapshot.docs.first.data() as Map<String, dynamic>;
+      print('🔑 Attempting login for: $username');
       
-      // 2. Validate Password (Plaintext check as per web code)
-      if (userData['password'] != password) {
-        throw 'Incorrect password';
-      }
-
-      // 3. Validate Role
-      final String role = userData['role'] ?? '';
-      if (expectingAdmin && role == 'Kitchen') {
-         throw 'Kitchen staff must log in through the kitchen portal.';
-      }
-
-      // 4. Set user in AuthProvider
+      // Call AuthProvider's login method (which saves session)
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
-      final userId = querySnapshot.docs.first.id;
-      final user = KitchenUser.fromFirestore(userId, userData);
-      authProvider.user = user; // Set user directly
+      final success = await authProvider.login(username, password);
+      
+      if (!success) {
+        throw authProvider.error ?? 'Login failed';
+      }
+      
+      // Validate role
+      final user = authProvider.user;
+      if (user == null) {
+        throw 'Login failed - no user data';
+      }
+      
+      if (expectingAdmin && user.role == 'Kitchen') {
+        authProvider.logout(); // Clear the session
+        throw 'Kitchen staff must log in through the kitchen portal.';
+      }
+
+      print('✅ Login successful for ${user.username}');
 
       // Login Success
       ScaffoldMessenger.of(context).showSnackBar(
@@ -86,6 +77,7 @@ class _LoginScreenState extends State<LoginScreen> {
       Navigator.of(context).pushReplacementNamed('/dashboard');
 
     } catch (e) {
+      print('❌ Login error: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(e.toString()), backgroundColor: Colors.red),
       );

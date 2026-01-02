@@ -230,6 +230,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       children: [
                         if (!user!.isKitchen)
                           _buildActionButton(
+                            'Menu Management',
+                            Icons.restaurant_menu,
+                            () => Navigator.pushNamed(context, '/menu'),
+                          ),
+                        _buildActionButton(
+                          'Sales Report',
+                          Icons.bar_chart,
+                          () => Navigator.pushNamed(context, '/reports'),
+                        ),
+                        if (!user!.isKitchen)
+                          _buildActionButton(
                             'Kitchen View',
                             Icons.restaurant_menu,
                             () {

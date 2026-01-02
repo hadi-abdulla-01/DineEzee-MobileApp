@@ -106,17 +106,32 @@ class FirestoreService {
 
   /// Get active orders (received, preparing, ready) for kitchen view
   Future<List<models.Order>> getActiveOrders(String branchId) async {
-    final snapshot = await _db
-        .collection('restaurants')
-        .doc(RESTAURANT_ID)
-        .collection('orders')
-        .where('branchId', isEqualTo: branchId)
-        .where('status', whereIn: ['received', 'preparing', 'ready'])
-        .get();
+    try {
+      final snapshot = await _db
+          .collection('restaurants')
+          .doc(RESTAURANT_ID)
+          .collection('orders')
+          .where('branchId', isEqualTo: branchId)
+          .where('status', whereIn: ['received', 'preparing', 'ready'])
+          .get(const GetOptions(source: Source.server));
 
-    return snapshot.docs
-        .map((doc) => models.Order.fromFirestore(doc.id, doc.data() as Map<String, dynamic>))
-        .toList();
+      return snapshot.docs
+          .map((doc) => models.Order.fromFirestore(doc.id, doc.data() as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      print('⚠️ Error fetching active orders from server, using cache: $e');
+      final snapshot = await _db
+          .collection('restaurants')
+          .doc(RESTAURANT_ID)
+          .collection('orders')
+          .where('branchId', isEqualTo: branchId)
+          .where('status', whereIn: ['received', 'preparing', 'ready'])
+          .get();
+
+      return snapshot.docs
+          .map((doc) => models.Order.fromFirestore(doc.id, doc.data() as Map<String, dynamic>))
+          .toList();
+    }
   }
 
   /// Get remote orders (online/take-away)
@@ -242,35 +257,69 @@ class FirestoreService {
   /// Get settings for a specific branch
   Future<RestaurantSettings?> getSettings(String branchId) async {
     try {
-      // Get settings from settings/general subdocument
-      final settingsDoc = await _db
-          .collection('restaurants')
-          .doc(RESTAURANT_ID)
-          .collection('branches')
-          .doc(branchId)
-          .collection('settings')
-          .doc('general')
-          .get();
+      // Try to get from server first to ensure fresh data
+      try {
+        // Get settings from settings/general subdocument
+        final settingsDoc = await _db
+            .collection('restaurants')
+            .doc(RESTAURANT_ID)
+            .collection('branches')
+            .doc(branchId)
+            .collection('settings')
+            .doc('general')
+            .get(const GetOptions(source: Source.server));
 
-      // Also get branch document for mealSessions (stored at branch level in web app)
-      final branchDoc = await _db
-          .collection('restaurants')
-          .doc(RESTAURANT_ID)
-          .collection('branches')
-          .doc(branchId)
-          .get();
+        // Also get branch document for mealSessions (stored at branch level in web app)
+        final branchDoc = await _db
+            .collection('restaurants')
+            .doc(RESTAURANT_ID)
+            .collection('branches')
+            .doc(branchId)
+            .get(const GetOptions(source: Source.server));
 
+        return _processSettingsData(branchId, settingsDoc, branchDoc);
+      } catch (e) {
+        print('⚠️ Error fetching from server, falling back to cache: $e');
+        // Fallback to cache/default if server fails
+         final settingsDoc = await _db
+            .collection('restaurants')
+            .doc(RESTAURANT_ID)
+            .collection('branches')
+            .doc(branchId)
+            .collection('settings')
+            .doc('general')
+            .get();
+
+        final branchDoc = await _db
+            .collection('restaurants')
+            .doc(RESTAURANT_ID)
+            .collection('branches')
+            .doc(branchId)
+            .get();
+            
+        return _processSettingsData(branchId, settingsDoc, branchDoc);
+      }
+    } catch (e) {
+      print('❌ Error loading settings for branch $branchId: $e');
+      return null;
+    }
+  }
+
+  Future<RestaurantSettings?> _processSettingsData(
+      String branchId, 
+      DocumentSnapshot settingsDoc, 
+      DocumentSnapshot branchDoc
+  ) async {
       Map<String, dynamic> settingsData = {};
       
       if (settingsDoc.exists && settingsDoc.data() != null) {
-        settingsData = Map<String, dynamic>.from(settingsDoc.data()!);
+        settingsData = Map<String, dynamic>.from(settingsDoc.data() as Map<String, dynamic>);
         print('✅ Found settings subdocument');
       }
       
       if (branchDoc.exists && branchDoc.data() != null) {
-        final branchData = branchDoc.data()!;
+        final branchData = branchDoc.data() as Map<String, dynamic>;
         print('✅ Found branch document');
-        print('📋 Branch document keys: ${branchData.keys.toList()}');
         
         // Merge mealSessions from branch document if not in settings
         if (branchData['mealSessions'] != null) {
@@ -281,25 +330,11 @@ class FirestoreService {
         // Merge menuCategories from branch document if not in settings
         if (branchData['menuCategories'] != null) {
           settingsData['menuCategories'] = branchData['menuCategories'];
-          print('✅ Using menuCategories from branch document: ${branchData['menuCategories']}');
         } else {
           print('⚠️ menuCategories not found in branch document, initializing defaults');
           // Initialize with default categories (matching web app defaults)
           final defaultCategories = ['Meals', 'Snacks', 'Beverages', 'Desserts'];
           settingsData['menuCategories'] = defaultCategories;
-          
-          // Save to database for future use
-          try {
-            await _db
-                .collection('restaurants')
-                .doc(RESTAURANT_ID)
-                .collection('branches')
-                .doc(branchId)
-                .update({'menuCategories': defaultCategories});
-            print('✅ Initialized default categories in database');
-          } catch (e) {
-            print('⚠️ Could not save default categories: $e');
-          }
         }
         
         // Also get other fields from branch if not in settings
@@ -316,10 +351,6 @@ class FirestoreService {
       }
 
       return RestaurantSettings.fromMap(settingsData);
-    } catch (e) {
-      print('❌ Error loading settings for branch $branchId: $e');
-      return null;
-    }
   }
 
   /// Update settings (creates if doesn't exist)
@@ -611,6 +642,136 @@ class FirestoreService {
     return Branch.fromFirestore(doc.id, doc.data() as Map<String, dynamic>);
   }
 
+  /// Add new branch
+  Future<String> addBranch(String name, bool isMain) async {
+    // If setting as main, unset other main branches first
+    if (isMain) {
+      final mainBranches = await _db
+          .collection('restaurants')
+          .doc(RESTAURANT_ID)
+          .collection('branches')
+          .where('isMain', isEqualTo: true)
+          .get();
+
+      final batch = _db.batch();
+      for (var doc in mainBranches.docs) {
+        batch.update(doc.reference, {'isMain': false});
+      }
+      await batch.commit();
+    }
+
+    final branchData = {
+      'name': name,
+      'isMain': isMain,
+      'restaurantName': name,
+      'restaurantAddress': '123 Foodie Lane, Gourmet City',
+      'currencySymbol': '\$',
+      'currencyDecimalPlaces': 2,
+      'timezone': 'Asia/Kolkata',
+      'menuCategories': ['Meals', 'Snacks', 'Beverages', 'Desserts'],
+    };
+
+    final docRef = await _db
+        .collection('restaurants')
+        .doc(RESTAURANT_ID)
+        .collection('branches')
+        .add(branchData);
+
+    print('✅ Branch added: $name (${docRef.id})');
+    return docRef.id;
+  }
+
+  /// Delete branch
+  Future<void> deleteBranch(String branchId) async {
+    // Check if it's the main branch
+    final branch = await getBranchById(branchId);
+    if (branch?.isMain == true) {
+      throw Exception('Cannot delete the main branch');
+    }
+
+    await _db
+        .collection('restaurants')
+        .doc(RESTAURANT_ID)
+        .collection('branches')
+        .doc(branchId)
+        .delete();
+
+    print('✅ Branch deleted: $branchId');
+  }
+
+  /// Set branch as main
+  Future<void> setMainBranch(String branchId) async {
+    // Unset all other main branches
+    final mainBranches = await _db
+        .collection('restaurants')
+        .doc(RESTAURANT_ID)
+        .collection('branches')
+        .where('isMain', isEqualTo: true)
+        .get();
+
+    final batch = _db.batch();
+    for (var doc in mainBranches.docs) {
+      batch.update(doc.reference, {'isMain': false});
+    }
+
+    // Set the new main branch
+    final branchRef = _db
+        .collection('restaurants')
+        .doc(RESTAURANT_ID)
+        .collection('branches')
+        .doc(branchId);
+    batch.update(branchRef, {'isMain': true});
+
+    await batch.commit();
+    print('✅ Main branch set: $branchId');
+  }
+
+  /// Update branch details (name, address, etc.)
+  Future<void> updateBranchDetails(String branchId, Map<String, dynamic> updates) async {
+    await _db
+        .collection('restaurants')
+        .doc(RESTAURANT_ID)
+        .collection('branches')
+        .doc(branchId)
+        .update(updates);
+
+    print('✅ Branch details updated: $branchId');
+  }
+
+  /// Get global restaurant details
+  Future<Map<String, dynamic>?> getRestaurantDetails() async {
+    try {
+      final doc = await _db
+          .collection('restaurants')
+          .doc(RESTAURANT_ID)
+          .get();
+
+      if (!doc.exists) return null;
+      
+      final data = doc.data() as Map<String, dynamic>;
+      return {
+        'name': data['name'] ?? 'DineEZee',
+        'address': data['address'] ?? '123 Foodie Lane, Gourmet City',
+      };
+    } catch (e) {
+      print('❌ Error fetching restaurant details: $e');
+      return null;
+    }
+  }
+
+  /// Update global restaurant details
+  Future<void> updateRestaurantDetails(String name, String address) async {
+    await _db
+        .collection('restaurants')
+        .doc(RESTAURANT_ID)
+        .update({
+      'name': name,
+      'address': address,
+    });
+
+    print('✅ Global restaurant details updated');
+  }
+
   // ========== CATEGORIES ==========
 
   /// Get all categories
@@ -625,6 +786,32 @@ class FirestoreService {
     return snapshot.docs
         .map((doc) => Category.fromFirestore(doc.id, doc.data() as Map<String, dynamic>))
         .toList();
+  }
+
+  // ========== INVOICE & PRINT SETTINGS ==========
+
+  /// Update invoice settings for a branch
+  Future<void> updateInvoiceSettings(String branchId, Map<String, dynamic> invoiceSettings) async {
+    await _db
+        .collection('restaurants')
+        .doc(RESTAURANT_ID)
+        .collection('branches')
+        .doc(branchId)
+        .update({'invoiceSettings': invoiceSettings});
+
+    print('✅ Invoice settings updated for branch: $branchId');
+  }
+
+  /// Update print settings for a branch
+  Future<void> updatePrintSettings(String branchId, Map<String, dynamic> printSettings) async {
+    await _db
+        .collection('restaurants')
+        .doc(RESTAURANT_ID)
+        .collection('branches')
+        .doc(branchId)
+        .update({'printSettings': printSettings});
+
+    print('✅ Print settings updated for branch: $branchId');
   }
 
 }
