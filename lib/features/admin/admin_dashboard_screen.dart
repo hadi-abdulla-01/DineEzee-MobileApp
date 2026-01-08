@@ -6,6 +6,7 @@ import '../../services/firestore_service.dart';
 import '../../models/order.dart' as models;
 import '../../models/menu_item.dart';
 import '../../models/settings.dart';
+import '../../models/branch.dart';
 import '../kitchen/kitchen_dashboard_screen.dart';
 import '../../widgets/theme_toggle.dart';
 import '../../widgets/app_drawer.dart';
@@ -24,11 +25,39 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   List<models.Order> _completedOrders = [];
   List<MenuItem> _menuItems = [];
   RestaurantSettings? _settings;
+  
+  // Branch selection for global admins
+  List<Branch> _branches = [];
+  String? _selectedBranchId; // null = "All Branches"
+  bool _isGlobalAdmin = false;
 
   @override
   void initState() {
     super.initState();
-    _loadData();
+    _initializeAndLoadData();
+  }
+
+  Future<void> _initializeAndLoadData() async {
+    final user = Provider.of<AuthProvider>(context, listen: false).user;
+    _isGlobalAdmin = user?.isGlobalAdmin ?? false;
+    
+    if (_isGlobalAdmin) {
+      await _loadBranches();
+    }
+    
+    await _loadData();
+  }
+
+  Future<void> _loadBranches() async {
+    try {
+      final branches = await _firestoreService.getBranches();
+      setState(() {
+        _branches = branches;
+      });
+      print('🏢 Loaded ${branches.length} branches');
+    } catch (e) {
+      print('❌ Error loading branches: $e');
+    }
   }
 
   Future<void> _loadData() async {
@@ -39,7 +68,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       final user = Provider.of<AuthProvider>(context, listen: false).user;
       print('👤 User: ${user?.username}, Role: ${user?.role}, BranchId: ${user?.branchId}');
       
-      final branchId = user?.branchId;
+      // Determine which branch to load data for
+      String? branchId;
+      if (_isGlobalAdmin) {
+        // Global admin: use selected branch (null = all branches)
+        branchId = _selectedBranchId;
+        print('🏢 Global Admin - Loading data for: ${branchId ?? "All Branches"}');
+      } else {
+        // Branch user: use their assigned branch
+        branchId = user?.branchId;
+        print('🏢 Branch User - Loading data for branch: $branchId');
+      }
 
       // Fetch data with error handling for each
       List<models.Order> orders = [];
@@ -157,11 +196,77 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             tooltip: 'Menu',
           ),
         ),
-        title: Text(
-          'Welcome, ${user?.username ?? "Admin"}!',
-          style: Theme.of(context).appBarTheme.titleTextStyle,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Welcome, ${user?.username ?? "Admin"}!',
+              style: Theme.of(context).appBarTheme.titleTextStyle,
+            ),
+            if (_isGlobalAdmin && _selectedBranchId != null)
+              Text(
+                _branches.firstWhere((b) => b.id == _selectedBranchId, orElse: () => Branch(id: '', name: 'Unknown', isMain: false, currencySymbol: r'$', currencyDecimalPlaces: 2, timezone: 'Asia/Kolkata')).name,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).appBarTheme.foregroundColor?.withOpacity(0.7),
+                  fontFamily: 'Poppins',
+                ),
+              ),
+          ],
         ),
         actions: [
+          // Branch Selector for Global Admins
+          if (_isGlobalAdmin && _branches.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8.0),
+              child: DropdownButton<String?>(
+                value: _selectedBranchId,
+                hint: const Text('All Branches', style: TextStyle(fontSize: 14)),
+                icon: const Icon(Icons.arrow_drop_down),
+                underline: Container(),
+                dropdownColor: Theme.of(context).cardColor,
+                style: TextStyle(
+                  color: Theme.of(context).appBarTheme.foregroundColor,
+                  fontSize: 14,
+                  fontFamily: 'Poppins',
+                ),
+                items: [
+                  DropdownMenuItem<String?>(
+                    value: null,
+                    child: Row(
+                      children: [
+                        Icon(Icons.business, size: 16, color: AppColors.primaryRed),
+                        const SizedBox(width: 8),
+                        const Text('All Branches'),
+                      ],
+                    ),
+                  ),
+                  ..._branches.map((branch) {
+                    return DropdownMenuItem<String?>(
+                      value: branch.id,
+                      child: Row(
+                        children: [
+                          Icon(
+                            branch.isMain ? Icons.home : Icons.store,
+                            size: 16,
+                            color: branch.isMain ? AppColors.primaryRed : Colors.grey,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(branch.name),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                ],
+                onChanged: (String? newValue) {
+                  setState(() {
+                    _selectedBranchId = newValue;
+                  });
+                  _loadData(); // Reload data for selected branch
+                },
+              ),
+            ),
           const ThemeToggleButton(),
         ],
       ),
@@ -175,6 +280,41 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // Branch Indicator for Global Admins
+                    if (_isGlobalAdmin)
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        margin: const EdgeInsets.only(bottom: 16),
+                        decoration: BoxDecoration(
+                          color: AppColors.primaryRed.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: AppColors.primaryRed.withOpacity(0.3)),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              _selectedBranchId == null ? Icons.business : Icons.store,
+                              color: AppColors.primaryRed,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                _selectedBranchId == null
+                                    ? 'Viewing: All Branches (Combined Data)'
+                                    : 'Viewing: ${_branches.firstWhere((b) => b.id == _selectedBranchId, orElse: () => Branch(id: '', name: 'Selected Branch', isMain: false, currencySymbol: r'$', currencyDecimalPlaces: 2, timezone: 'Asia/Kolkata')).name}',
+                                style: TextStyle(
+                                  color: AppColors.primaryRed,
+                                  fontWeight: FontWeight.w600,
+                                  fontFamily: 'Poppins',
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    
                     // Stats Grid
                     GridView.count(
                       crossAxisCount: 2,

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../models/user.dart';
+import '../../services/firebase_config_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -35,10 +36,10 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  Future<void> _handleLogin(String username, String password, bool expectingAdmin) async {
-    if (username.isEmpty || password.isEmpty) {
+  Future<void> _handleLogin(String emailOrUsername, String password, bool expectingAdmin) async {
+    if (emailOrUsername.isEmpty || password.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter username and password')),
+        const SnackBar(content: Text('Please enter email and password')),
       );
       return;
     }
@@ -46,11 +47,28 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
 
     try {
-      print('🔑 Attempting login for: $username');
+      print('🔑 Attempting login for: $emailOrUsername');
       
-      // Call AuthProvider's login method (which saves session)
+      // Determine if input is email or username
+      String email;
+      if (emailOrUsername.contains('@')) {
+        // Already an email
+        email = emailOrUsername;
+      } else {
+        // Username provided - need to get restaurant ID
+        final restaurantId = await FirebaseConfigService.getRestaurantId();
+        if (restaurantId == null) {
+          throw 'Please enter your full email address (e.g., username@restaurantid.dineezee)';
+        }
+        // Convert username to email format
+        email = '$emailOrUsername@$restaurantId.dineezee';
+      }
+      
+      print('📧 Using email: $email');
+      
+      // Call AuthProvider's login method (which uses Firebase Auth)
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
-      final success = await authProvider.login(username, password);
+      final success = await authProvider.login(email, password);
       
       if (!success) {
         throw authProvider.error ?? 'Login failed';
@@ -63,15 +81,20 @@ class _LoginScreenState extends State<LoginScreen> {
       }
       
       if (expectingAdmin && user.role == 'Kitchen') {
-        authProvider.logout(); // Clear the session
+        await authProvider.logout(); // Clear the session
         throw 'Kitchen staff must log in through the kitchen portal.';
       }
 
       print('✅ Login successful for ${user.username}');
+      print('🏢 Restaurant: ${email.split('@')[1].split('.')[0]}');
+      print('🏢 Branch: ${user.branchId ?? "Global Admin - All Branches"}');
 
       // Login Success
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Login Successful!')),
+        SnackBar(
+          content: Text('Welcome ${user.username}!'),
+          backgroundColor: Colors.green,
+        ),
       );
 
       Navigator.of(context).pushReplacementNamed('/dashboard');
@@ -105,7 +128,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ? _buildLoginPanel(
                       key: const ValueKey('AdminLogin'),
                       title: 'Admin Login',
-                      usernameHint: 'Your Username',
+                      usernameHint: 'Email (e.g., admin@restaurant.dineezee)',
                       userCtrl: _adminUserCtrl,
                       passCtrl: _adminPassCtrl,
                       isExpectingAdmin: true,
@@ -116,7 +139,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   : _buildLoginPanel(
                       key: const ValueKey('KitchenLogin'),
                       title: 'Kitchen Login',
-                      usernameHint: 'Kitchen User',
+                      usernameHint: 'Email (e.g., user@restaurant.dineezee)',
                       userCtrl: _kitchenUserCtrl,
                       passCtrl: _kitchenPassCtrl,
                       isExpectingAdmin: false,

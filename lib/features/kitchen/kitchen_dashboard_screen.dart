@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'dart:async';
 import '../../providers/auth_provider.dart';
 import '../../services/firestore_service.dart';
+import '../../services/push_notification_service.dart';
 import '../../models/order.dart' as models;
 import '../../models/settings.dart';
 import '../../models/table.dart';
@@ -10,6 +11,7 @@ import 'package:intl/intl.dart';
 import '../../widgets/theme_toggle.dart';
 import '../../core/app_colors.dart';
 import '../../widgets/app_drawer.dart';
+import '../../widgets/order_notification_overlay.dart';
 
 class KitchenDashboardScreen extends StatefulWidget {
   const KitchenDashboardScreen({super.key});
@@ -20,16 +22,39 @@ class KitchenDashboardScreen extends StatefulWidget {
 
 class _KitchenDashboardScreenState extends State<KitchenDashboardScreen> {
   final FirestoreService _firestoreService = FirestoreService();
+  final PushNotificationService _notificationService = PushNotificationService();
   
   bool _isLoading = true;
   List<models.Order> _activeOrders = [];
   RestaurantSettings? _settings;
   Timer? _refreshTimer;
+  String? _currentBranchId;
+  
+  // Notification overlay state
+  OverlayEntry? _notificationOverlay;
+  models.Order? _currentNotificationOrder;
 
   @override
   void initState() {
     super.initState();
-    _loadOrders();
+    _initializeKitchen();
+  }
+
+  Future<void> _initializeKitchen() async {
+    await _loadOrders();
+    
+    // Initialize push notification service after getting branch ID
+    if (_currentBranchId != null) {
+      print('🔔 Initializing push notifications for branch: $_currentBranchId');
+      await _notificationService.initialize(
+        _currentBranchId!,
+        onNewOrder: _showOrderNotification,
+      );
+      print('✅ Push notifications initialized');
+    } else {
+      print('⚠️ No branch ID available for push notifications');
+    }
+    
     // Auto-refresh every 5 seconds
     _refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) => _loadOrders());
   }
@@ -37,7 +62,44 @@ class _KitchenDashboardScreenState extends State<KitchenDashboardScreen> {
   @override
   void dispose() {
     _refreshTimer?.cancel();
+    _notificationService.dispose();
+    _removeNotificationOverlay();
     super.dispose();
+  }
+  
+  /// Show visual notification overlay for new order
+  void _showOrderNotification(models.Order order) {
+    if (!mounted) return;
+    
+    // Remove any existing notification
+    _removeNotificationOverlay();
+    
+    _currentNotificationOrder = order;
+    
+    _notificationOverlay = OverlayEntry(
+      builder: (context) => Positioned(
+        top: 0,
+        left: 0,
+        right: 0,
+        child: SafeArea(
+          child: OrderNotificationOverlay(
+            customerName: order.customerName,
+            orderType: order.orderType,
+            itemCount: order.items.length,
+            onDismiss: _removeNotificationOverlay,
+          ),
+        ),
+      ),
+    );
+    
+    Overlay.of(context).insert(_notificationOverlay!);
+  }
+  
+  /// Remove notification overlay
+  void _removeNotificationOverlay() {
+    _notificationOverlay?.remove();
+    _notificationOverlay = null;
+    _currentNotificationOrder = null;
   }
 
   Future<void> _loadOrders() async {
@@ -49,6 +111,7 @@ class _KitchenDashboardScreenState extends State<KitchenDashboardScreen> {
         final mainBranch = await _firestoreService.getMainBranch();
         if (mainBranch == null) return;
         
+        _currentBranchId = mainBranch.id;
         final orders = await _firestoreService.getActiveOrders(mainBranch.id);
         final settings = await _firestoreService.getSettings(mainBranch.id);
         
@@ -60,6 +123,7 @@ class _KitchenDashboardScreenState extends State<KitchenDashboardScreen> {
           });
         }
       } else {
+        _currentBranchId = branchId;
         final orders = await _firestoreService.getActiveOrders(branchId);
         final settings = await _firestoreService.getSettings(branchId);
         

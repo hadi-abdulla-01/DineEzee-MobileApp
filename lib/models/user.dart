@@ -1,6 +1,7 @@
 class KitchenUser {
   final String id;
   final String username;
+  final String? email; // Email for Firebase Authentication
   final String password;
   final String role; // 'Admin', 'Manager', 'Server', 'Kitchen'
   final String? branchId;
@@ -10,6 +11,7 @@ class KitchenUser {
   KitchenUser({
     required this.id,
     required this.username,
+    this.email,
     required this.password,
     required this.role,
     this.branchId,
@@ -38,6 +40,7 @@ class KitchenUser {
     return KitchenUser(
       id: id,
       username: data['username'] ?? '',
+      email: data['email'],
       password: data['password'] ?? '',
       role: data['role'] ?? 'Kitchen',
       branchId: data['branchId'],
@@ -49,6 +52,7 @@ class KitchenUser {
   Map<String, dynamic> toMap() {
     return {
       'username': username,
+      'email': email,
       'password': password,
       'role': role,
       'branchId': branchId,
@@ -61,4 +65,7 @@ class KitchenUser {
   bool get isManager => role == 'Manager';
   bool get isKitchen => role == 'Kitchen';
   bool get isServer => role == 'Server';
+  
+  // Check if user is a global admin (admin with no branch or username 'admin')
+  bool get isGlobalAdmin => (role == 'Admin' && (branchId == null || branchId!.isEmpty)) || username.toLowerCase() == 'admin';
 }

@@ -6,10 +6,22 @@ import '../models/user.dart';
 import '../models/table.dart';
 import '../models/branch.dart';
 import '../models/category.dart';
+import 'firebase_config_service.dart';
 
 class FirestoreService {
-  static const String RESTAURANT_ID = 'dineeasee-restaurant';
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
+  // static const String RESTAURANT_ID = 'dineeasee-restaurant'; // Removed for multi-tenant
+  
+  // Use getter to avoid immediate initialization before Firebase.initializeApp()
+  FirebaseFirestore get _db => FirebaseFirestore.instance;
+
+  Future<String> _getRestaurantId() async {
+    final restaurantId = await FirebaseConfigService.getRestaurantId();
+    if (restaurantId == null) {
+      throw Exception('No restaurant configured');
+    }
+    return restaurantId;
+  }
+
 
   // ========== CATEGORIES ==========
 
@@ -17,7 +29,7 @@ class FirestoreService {
   Future<void> addCategory(String branchId, String categoryName) async {
     final branchRef = _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('branches')
         .doc(branchId);
 
@@ -39,7 +51,7 @@ class FirestoreService {
   Future<void> updateCategory(String branchId, String oldName, String newName) async {
     final branchRef = _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('branches')
         .doc(branchId);
 
@@ -60,7 +72,7 @@ class FirestoreService {
   Future<void> deleteCategory(String branchId, String categoryName) async {
     final branchRef = _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('branches')
         .doc(branchId);
 
@@ -78,7 +90,7 @@ class FirestoreService {
   Future<void> reorderCategories(String branchId, List<String> newOrder) async {
     await _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('branches')
         .doc(branchId)
         .update({'menuCategories': newOrder});
@@ -91,7 +103,7 @@ class FirestoreService {
   Future<List<models.Order>> getOrders(String? branchId) async {
     Query query = _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('orders');
 
     if (branchId != null) {
@@ -109,7 +121,7 @@ class FirestoreService {
     try {
       final snapshot = await _db
           .collection('restaurants')
-          .doc(RESTAURANT_ID)
+          .doc(await _getRestaurantId())
           .collection('orders')
           .where('branchId', isEqualTo: branchId)
           .where('status', whereIn: ['received', 'preparing', 'ready'])
@@ -122,7 +134,7 @@ class FirestoreService {
       print('⚠️ Error fetching active orders from server, using cache: $e');
       final snapshot = await _db
           .collection('restaurants')
-          .doc(RESTAURANT_ID)
+          .doc(await _getRestaurantId())
           .collection('orders')
           .where('branchId', isEqualTo: branchId)
           .where('status', whereIn: ['received', 'preparing', 'ready'])
@@ -138,7 +150,7 @@ class FirestoreService {
   Future<List<models.Order>> getRemoteOrders(String? branchId) async {
     Query query = _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('remoteOrders');
 
     if (branchId != null) {
@@ -155,7 +167,7 @@ class FirestoreService {
   Future<void> updateOrderStatus(String orderId, String newStatus) async {
     await _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('orders')
         .doc(orderId)
         .update({'status': newStatus});
@@ -165,7 +177,7 @@ class FirestoreService {
   Future<void> updateOrderItemReady(String orderId, String orderItemId, bool isReady) async {
     final orderDoc = await _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('orders')
         .doc(orderId)
         .get();
@@ -186,7 +198,7 @@ class FirestoreService {
   Future<void> cancelOrderItem(String orderId, String orderItemId) async {
     final orderDoc = await _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('orders')
         .doc(orderId)
         .get();
@@ -209,7 +221,7 @@ class FirestoreService {
   Future<List<MenuItem>> getMenuItems(String? branchId) async {
     Query query = _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('menuItems');
 
     if (branchId != null) {
@@ -226,7 +238,7 @@ class FirestoreService {
   Future<String> addMenuItem(MenuItem item) async {
     final docRef = await _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('menuItems')
         .add(item.toMap());
     return docRef.id;
@@ -236,7 +248,7 @@ class FirestoreService {
   Future<void> updateMenuItem(String itemId, MenuItem item) async {
     await _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('menuItems')
         .doc(itemId)
         .update(item.toMap());
@@ -246,7 +258,7 @@ class FirestoreService {
   Future<void> deleteMenuItem(String itemId) async {
     await _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('menuItems')
         .doc(itemId)
         .delete();
@@ -262,7 +274,7 @@ class FirestoreService {
         // Get settings from settings/general subdocument
         final settingsDoc = await _db
             .collection('restaurants')
-            .doc(RESTAURANT_ID)
+            .doc(await _getRestaurantId())
             .collection('branches')
             .doc(branchId)
             .collection('settings')
@@ -272,7 +284,7 @@ class FirestoreService {
         // Also get branch document for mealSessions (stored at branch level in web app)
         final branchDoc = await _db
             .collection('restaurants')
-            .doc(RESTAURANT_ID)
+            .doc(await _getRestaurantId())
             .collection('branches')
             .doc(branchId)
             .get(const GetOptions(source: Source.server));
@@ -283,7 +295,7 @@ class FirestoreService {
         // Fallback to cache/default if server fails
          final settingsDoc = await _db
             .collection('restaurants')
-            .doc(RESTAURANT_ID)
+            .doc(await _getRestaurantId())
             .collection('branches')
             .doc(branchId)
             .collection('settings')
@@ -292,7 +304,7 @@ class FirestoreService {
 
         final branchDoc = await _db
             .collection('restaurants')
-            .doc(RESTAURANT_ID)
+            .doc(await _getRestaurantId())
             .collection('branches')
             .doc(branchId)
             .get();
@@ -357,7 +369,7 @@ class FirestoreService {
   Future<void> updateSettings(String branchId, Map<String, dynamic> updates) async {
     await _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('branches')
         .doc(branchId)
         .collection('settings')
@@ -371,7 +383,7 @@ class FirestoreService {
   Future<String> addMealSession(String branchId, MealSession session) async {
     final branchRef = _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('branches')
         .doc(branchId);
 
@@ -391,7 +403,7 @@ class FirestoreService {
     
     final branchRef = _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('branches')
         .doc(branchId);
 
@@ -421,7 +433,7 @@ class FirestoreService {
     
     final branchRef = _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('branches')
         .doc(branchId);
 
@@ -444,7 +456,7 @@ class FirestoreService {
   Future<void> deleteMealSession(String branchId, String sessionId) async {
     final branchRef = _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('branches')
         .doc(branchId);
 
@@ -462,7 +474,7 @@ class FirestoreService {
       String branchId, bool enabled, String? sessionId) async {
     await _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('branches')
         .doc(branchId)
         .collection('settings')
@@ -481,7 +493,7 @@ class FirestoreService {
   Future<List<KitchenUser>> getKitchenUsers() async {
     final snapshot = await _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('kitchenUsers')
         .get();
 
@@ -494,7 +506,7 @@ class FirestoreService {
   Future<KitchenUser?> getUserByUsername(String username) async {
     final snapshot = await _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('kitchenUsers')
         .where('username', isEqualTo: username)
         .limit(1)
@@ -506,11 +518,31 @@ class FirestoreService {
     return KitchenUser.fromFirestore(doc.id, doc.data() as Map<String, dynamic>);
   }
 
+  /// Get user by email (for Firebase Auth login)
+  Future<KitchenUser?> getUserByEmail(String email) async {
+    final snapshot = await _db
+        .collection('restaurants')
+        .doc(await _getRestaurantId())
+        .collection('kitchenUsers')
+        .where('email', isEqualTo: email)
+        .limit(1)
+        .get();
+
+    if (snapshot.docs.isEmpty) {
+      print('❌ No user found with email: $email');
+      return null;
+    }
+
+    final doc = snapshot.docs.first;
+    print('✅ Found user: ${doc.data()['username']}');
+    return KitchenUser.fromFirestore(doc.id, doc.data() as Map<String, dynamic>);
+  }
+
   /// Add new user
   Future<String> addUser(KitchenUser user) async {
     final docRef = await _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('kitchenUsers')
         .add(user.toMap());
     return docRef.id;
@@ -520,7 +552,7 @@ class FirestoreService {
   Future<void> updateUser(String userId, KitchenUser user) async {
     await _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('kitchenUsers')
         .doc(userId)
         .update(user.toMap());
@@ -530,7 +562,7 @@ class FirestoreService {
   Future<void> deleteUser(String userId) async {
     await _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('kitchenUsers')
         .doc(userId)
         .delete();
@@ -542,7 +574,7 @@ class FirestoreService {
   Future<List<RestaurantTable>> getTables(String? branchId) async {
     Query query = _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('tables');
 
     if (branchId != null) {
@@ -559,7 +591,7 @@ class FirestoreService {
   Future<RestaurantTable?> getTableById(String tableId) async {
     final doc = await _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('tables')
         .doc(tableId)
         .get();
@@ -572,7 +604,7 @@ class FirestoreService {
   Future<String> addTable(RestaurantTable table) async {
     final docRef = await _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('tables')
         .add(table.toMap());
     return docRef.id;
@@ -582,7 +614,7 @@ class FirestoreService {
   Future<void> updateTable(String tableId, RestaurantTable table) async {
     await _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('tables')
         .doc(tableId)
         .update(table.toMap());
@@ -592,7 +624,7 @@ class FirestoreService {
   Future<void> deleteTable(String tableId) async {
     await _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('tables')
         .doc(tableId)
         .delete();
@@ -604,7 +636,7 @@ class FirestoreService {
   Future<List<Branch>> getBranches() async {
     final snapshot = await _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('branches')
         .get();
 
@@ -617,7 +649,7 @@ class FirestoreService {
   Future<Branch?> getMainBranch() async {
     final snapshot = await _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('branches')
         .where('isMain', isEqualTo: true)
         .limit(1)
@@ -633,7 +665,7 @@ class FirestoreService {
   Future<Branch?> getBranchById(String branchId) async {
     final doc = await _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('branches')
         .doc(branchId)
         .get();
@@ -648,7 +680,7 @@ class FirestoreService {
     if (isMain) {
       final mainBranches = await _db
           .collection('restaurants')
-          .doc(RESTAURANT_ID)
+          .doc(await _getRestaurantId())
           .collection('branches')
           .where('isMain', isEqualTo: true)
           .get();
@@ -673,7 +705,7 @@ class FirestoreService {
 
     final docRef = await _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('branches')
         .add(branchData);
 
@@ -691,7 +723,7 @@ class FirestoreService {
 
     await _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('branches')
         .doc(branchId)
         .delete();
@@ -704,7 +736,7 @@ class FirestoreService {
     // Unset all other main branches
     final mainBranches = await _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('branches')
         .where('isMain', isEqualTo: true)
         .get();
@@ -717,7 +749,7 @@ class FirestoreService {
     // Set the new main branch
     final branchRef = _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('branches')
         .doc(branchId);
     batch.update(branchRef, {'isMain': true});
@@ -730,7 +762,7 @@ class FirestoreService {
   Future<void> updateBranchDetails(String branchId, Map<String, dynamic> updates) async {
     await _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('branches')
         .doc(branchId)
         .update(updates);
@@ -743,7 +775,7 @@ class FirestoreService {
     try {
       final doc = await _db
           .collection('restaurants')
-          .doc(RESTAURANT_ID)
+          .doc(await _getRestaurantId())
           .get();
 
       if (!doc.exists) return null;
@@ -763,7 +795,7 @@ class FirestoreService {
   Future<void> updateRestaurantDetails(String name, String address) async {
     await _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .update({
       'name': name,
       'address': address,
@@ -778,7 +810,7 @@ class FirestoreService {
   Future<List<Category>> getCategories() async {
     final snapshot = await _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('categories')
         .orderBy('order')
         .get();
@@ -794,7 +826,7 @@ class FirestoreService {
   Future<void> updateInvoiceSettings(String branchId, Map<String, dynamic> invoiceSettings) async {
     await _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('branches')
         .doc(branchId)
         .update({'invoiceSettings': invoiceSettings});
@@ -806,7 +838,7 @@ class FirestoreService {
   Future<void> updatePrintSettings(String branchId, Map<String, dynamic> printSettings) async {
     await _db
         .collection('restaurants')
-        .doc(RESTAURANT_ID)
+        .doc(await _getRestaurantId())
         .collection('branches')
         .doc(branchId)
         .update({'printSettings': printSettings});
